@@ -12,19 +12,18 @@ def batchnorm_forward(
     """
     BatchNorm function is defined as:
 
-    $$ y = \\gamma \\cdot \\hat{x}^k + \\beta $$
+    y = γ · x̂ᵏ + β 
 
     where:
-    - $\\gamma$ and $\\beta$ are trainable parameters that keeps representation
+    - γ and β are trainable parameters that keeps representation
         power of the network after normalization
-    - $\\hat{x}$ is the normalized input and defined as:
+    - x̂ is the normalized input and defined as:
     
-    $$ \\hat{x} = \\frac{ x - E[x] }{ \\sqrt{ \\sigma^2(x) } } $$
+    x̂ = (x - E[x]) ÷ √(σ²(x))
 
     where:
     - E[x] is expected value of x, ie. mean of x
-    - \\sqrt{ \\sigma^2(x) } is standard deviation of x
-    
+    - √(σ²(x)) is standard deviation of x
     """
 
     mean = np.mean(x, axis=0, keepdim=True)
