@@ -103,6 +103,8 @@ class RBM:
         batches = data[: num_batches * self.batch_size].reshape(
             num_batches, self.batch_size, self.num_visible
         )
+        error = 0.0
+
         for _ in range(epochs):
             for i in range(batches.shape[0]):
                 # Positive phase
@@ -118,3 +120,8 @@ class RBM:
                 self.W += lr * (vhT - vphpT) / self.batch_size
                 self.a += lr * np.sum(v - vp, axis=1, keepdims=True)
                 self.b += lr * np.sum(h - hp, axis=1, keepdims=True)
+
+                error += np.mean((v - vp) ** 2)
+
+        # Return average error
+        return error / (epochs * num_batches)
