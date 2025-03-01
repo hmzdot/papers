@@ -24,6 +24,9 @@ class RBM:
     W: np.ndarray
     """Weights"""
 
+    sigma: np.ndarray
+    """Standard deviations"""
+
     batch_size: int
 
     def __init__(self, num_visible: int, num_hidden: int, batch_size=32):
@@ -35,6 +38,7 @@ class RBM:
 
         self.a = np.zeros((num_visible, 1))
         self.b = np.zeros((num_hidden, 1))
+        self.sigma = np.ones((num_visible, 1))
 
     def energy(self, v: np.ndarray, h: np.ndarray) -> float:
         """
@@ -43,12 +47,15 @@ class RBM:
         - h: Hidden layer units (shaped h x 1)
 
         Energy function is defined as:
-        E(v,h) = -∑_i(a_i v_i) - ∑_j(b_j h_j) - ∑_ij(v_i W_ij h_j)
+
+        E(v,h) = ∑_i(v_i-a_i)^2 / 2*σ_i^2
+                - ∑_j(b_j h_j)
+                - ∑_ij(v_i/σ_i W_ij h_j)
         """
-        visible_term = np.dot(v.T, self.a)
-        interaction_term = np.dot(np.dot(v.T, self.W), h)
-        hidden_term = np.dot(h.T, self.b)
-        return -np.sum(visible_term + interaction_term + hidden_term)
+        quadratic_term = np.sum((v - self.a) ** 2 / (2 * self.sigma**2), axis=0)
+        interaction_term = np.sum((v / self.sigma) * np.dot(self.W, h))
+        hidden_term = np.sum(self.b * h, axis=0)
+        return np.sum(quadratic_term - interaction_term - hidden_term)
 
     def sample_hidden(self, v: np.ndarray) -> np.ndarray:
         """
@@ -59,20 +66,20 @@ class RBM:
 
         where σ is the sigmoid function
         """
-        prob_h_given_v = sigmoid(self.b + np.dot(self.W.T, v))
+        prob_h_given_v = sigmoid(self.b + np.dot(self.W, v))
         return np.random.binomial(1, prob_h_given_v).astype(int)
 
     def sample_visible(self, h: np.ndarray) -> np.ndarray:
         """
-        Given hidden units, sample visible units using Bernoulli
+        Given hidden units, sample visible units using Gaussian distribution
         Probability of visible, given hidden is defined as:
 
-        P(v_i = 1 | h) = σ(a_i + ∑_j h_jW_ij)
+        P(v_i | h) = N(a_i + ∑_j(h_j W_ij), sigma_i^2)
 
-        where σ is the sigmoid function
+        where N is the Gaussian normal function
         """
-        prob_v_given_h = sigmoid(self.a + np.dot(self.W.T, h))
-        return np.random.binomial(1, prob_v_given_h).astype(int)
+        mean_v = self.a + np.dot(self.W, h)
+        return np.random.normal(mean_v, self.sigma)
 
     def gibbs_sampling(self, v: np.ndarray, k=1) -> np.ndarray:
         """
