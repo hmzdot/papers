@@ -119,8 +119,8 @@ class RBM:
                 vphpT = vp.dot(hp.T)  # (n x h)
 
                 self.W += lr * (vhT - vphpT) / self.batch_size
-                self.a += lr * np.sum(v - vp, axis=1, keepdims=True)
-                self.b += lr * np.sum(h - hp, axis=1, keepdims=True)
+                self.a += lr * np.mean(v - vp, axis=1, keepdims=True)
+                self.b += lr * np.mean(h - hp, axis=1, keepdims=True)
 
                 error += np.mean((v - vp) ** 2)
 
