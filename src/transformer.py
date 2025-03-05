@@ -66,7 +66,7 @@ class AttentionBlock(nn.Module):
         super().__init__()
         self.dropout = Dropout(p=dropout_rate)
 
-    def forward(self, Q: Tensor, K: Tensor, V: Tensor) -> Tensor:
+    def forward(self, Q: Tensor, K: Tensor, V: Tensor, mask=None) -> Tensor:
         """
         Performs attention function
 
@@ -74,39 +74,19 @@ class AttentionBlock(nn.Module):
         """
         d_k = K.size(-1)  # Feature dimension of K
         attn_scores = (Q @ K.transpose(-1, -2)) / math.sqrt(d_k)
+        if mask is not None:
+            attn_scores = attn_scores.masked_fill(mask, -1e9)
         attn_weights = softmax(attn_scores, dim=-1)
         attn_weights = self.dropout(attn_weights)
         return attn_weights @ V
 
 
-class SingleHeadAttention(nn.Module):
-    def __init__(self, d_model: int, d_k: int, d_v: int) -> None:
-        super().__init__()
-        self.W_Q = nn.Parameter(torch.randn(d_model, d_k))
-        self.W_K = nn.Parameter(torch.randn(d_model, d_k))
-        self.W_V = nn.Parameter(torch.randn(d_model, d_v))
-        self.W_O = nn.Parameter(torch.randn(d_v, d_model))
-
-        xavier_uniform(self.W_Q)
-        xavier_uniform(self.W_K)
-        xavier_uniform(self.W_V)
-        xavier_uniform(self.W_O)
-
-        self.attention = AttentionBlock()
-
-    def forward(self, x: Tensor) -> Tensor:
-        Q = x @ self.W_Q  # Shape: (batch_size, seq_len, d_k)
-        K = x @ self.W_K  # Shape: (batch_size, seq_len, d_k)
-        V = x @ self.W_V  # Shape: (batch_size, seq_len, d_v)
-
-        return self.attention(Q, K, V) @ self.W_O
-
-
 class MultiHeadAttention(nn.Module):
-    def __init__(self, d_model: int, num_heads: int):
+    def __init__(self, d_model: int, num_heads: int, mask=None):
         super().__init__()
         self.num_heads = num_heads
         self.d_k = d_model // num_heads
+        self.mask = mask
 
         self.W_Q = nn.Linear(d_model, d_model)
         self.W_K = nn.Linear(d_model, d_model)
@@ -126,7 +106,7 @@ class MultiHeadAttention(nn.Module):
         K = self.W_K(x).view(B, T, self.num_heads, self.d_k).transpose(1, 2)
         V = self.W_V(x).view(B, T, self.num_heads, self.d_k).transpose(1, 2)
 
-        attn_output = self.attention(Q, K, V)
+        attn_output = self.attention(Q, K, V, self.mask)
         attn_output = attn_output.transpose(1, 2).contiguous().view(B, T, -1)
         return self.W_O(attn_output)
 
@@ -180,7 +160,7 @@ class PositionalEncoding(nn.Module):
 class EncoderLayer(nn.Module):
     def __init__(self, d_model: int, d_k: int, d_v: int, d_ff: int):
         super().__init__()
-        self.attn = SingleHeadAttention(d_model, d_k, d_v)
+        self.attn = MultiHeadAttention(d_model, d_k, d_v)
         self.ffn = FFN(d_model, d_ff)
         self.norm1 = LayerNorm((d_model,))
         self.norm2 = LayerNorm((d_model,))
@@ -199,6 +179,41 @@ class Encoder(nn.Module):
         super().__init__()
         self.layers = nn.ModuleList(
             [EncoderLayer(d_model, d_k, d_v, d_ff) for _ in range(n)]
+        )
+
+    def forward(self, x: Tensor) -> Tensor:
+        for layer in self.layers:
+            x = layer(x)
+        return x
+
+
+class DecoderLayer(nn.Module):
+    def __init__(self, d_model: int, d_k: int, d_v: int, d_ff: int):
+        super().__init__()
+        mask = torch.triu(torch.ones(d_k, d_k), diagonal=1)
+        self.masked_attn = MultiHeadAttention(d_model, d_k, d_v, mask=mask)
+        self.attn = MultiHeadAttention(d_model, d_k, d_v)
+        self.ffn = FFN(d_model, d_ff)
+        self.norm1 = LayerNorm((d_model,))
+        self.norm2 = LayerNorm((d_model,))
+
+    def forward(self, x: Tensor) -> Tensor:
+        masked_attn_out = self.masked_attn(x)
+        x = self.norm1(x + masked_attn_out)
+
+        attn_out = self.attn(x)
+        x = self.norm1(x + attn_out)
+
+        ffn_out = self.ffn(x)
+        x = self.norm2(x + ffn_out)
+        return x
+
+
+class Decoder(nn.Module):
+    def __init__(self, n: int, d_model: int, d_k: int, d_v: int, d_ff: int):
+        super().__init__()
+        self.layers = nn.ModuleList(
+            [DecoderLayer(d_model, d_k, d_v, d_ff) for _ in range(n)]
         )
 
     def forward(self, x: Tensor) -> Tensor:
