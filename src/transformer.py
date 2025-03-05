@@ -10,6 +10,26 @@ def softmax(z: Tensor, dim=None) -> Tensor:
     return z_exp / z_exp.sum(dim=dim, keepdim=True)
 
 
+def xavier_uniform(x: Tensor, fan_in: int, fan_out: int):
+    """
+    Performs uniform Xavier initialization
+
+    # Parameters
+    - x: Input tensor
+    - fan_in: Input parameter count (n_in)
+    - fan_out: Output parameter count (n_out)
+
+    Uniform Xavier initialization is defined as:
+
+    W_0 = U( -√(6 / (n_in + n_out)), √(6 / (n_in + n_out)) )
+
+    where U is the uniform function
+    """
+    a = math.sqrt(6 / (fan_in + fan_out))
+    with torch.no_grad():
+        return x.uniform_(-a, a)
+
+
 class LayerNorm(nn.Module):
     def __init__(self, shape: tuple[int, ...], eps=1e-5) -> None:
         super().__init__()
@@ -38,8 +58,10 @@ class AttentionBlock(nn.Module):
 
         Attention(Q,K,V) = softmax(Q K^T / √d_k)V
         """
-        d_k = torch.tensor(K.size(-1))  # Feature dimension of K
-        return softmax((Q @ K.transpose(-1, -2)) / torch.sqrt(d_k), dim=-1) @ V
+        d_k = K.size(-1)  # Feature dimension of K
+        attn_scores = (Q @ K.transpose(-1, -2)) / math.sqrt(d_k)
+        attn_weights = softmax(attn_scores, dim=-1)
+        return attn_weights @ V
 
 
 class SingleHeadAttention(nn.Module):
@@ -52,6 +74,11 @@ class SingleHeadAttention(nn.Module):
         self.W_V = nn.Parameter(torch.randn(d_model, d_v)) / sqrt_d_model
         self.W_O = nn.Parameter(torch.randn(d_v, d_model)) / sqrt_d_v
 
+        xavier_uniform(self.W_Q)
+        xavier_uniform(self.W_K)
+        xavier_uniform(self.W_V)
+        xavier_uniform(self.W_O)
+
         self.attention = AttentionBlock()
 
     def forward(self, x: Tensor) -> Tensor:
@@ -60,6 +87,33 @@ class SingleHeadAttention(nn.Module):
         V = x @ self.W_V  # Shape: (batch_size, seq_len, d_v)
 
         return self.attention(Q, K, V) @ self.W_O
+
+
+class MultiHeadAttention(nn.Module):
+    def __init__(self, d_model: int, num_heads: int):
+        super().__init__()
+        self.num_heads = num_heads
+        self.d_k = d_model // num_heads
+
+        self.W_Q = nn.Linear(d_model, d_model)
+        self.W_K = nn.Linear(d_model, d_model)
+        self.W_V = nn.Linear(d_model, d_model)
+        self.W_O = nn.Linear(d_model, d_model)
+
+        xavier_uniform(self.W_Q.weight)
+        xavier_uniform(self.W_K.weight)
+        xavier_uniform(self.W_V.weight)
+        xavier_uniform(self.W_O.weight)
+
+    def forward(self, x: Tensor) -> Tensor:
+        B, T, _ = x.shape
+        Q = self.W_Q(x).view(B, T, self.num_heads, self.d_k).transpose(1, 2)
+        K = self.W_K(x).view(B, T, self.num_heads, self.d_k).transpose(1, 2)
+        V = self.W_V(x).view(B, T, self.num_heads, self.d_k).transpose(1, 2)
+
+        attn_output = self.attention(Q, K, V)
+        attn_output = attn_output.transpose(1, 2).contiguous().view(B, T, -1)
+        return self.W_O(attn_output)
 
 
 class FFN(nn.Module):
