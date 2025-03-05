@@ -106,3 +106,50 @@ class PositionalEncoding(nn.Module):
             x: Input tensor (batch_size, seq_len, d_model)
         """
         return x + self.pe[:, : x.size(1)]
+
+
+class EncoderLayer(nn.Module):
+    def __init__(self, d_model: int, d_k: int, d_v: int, d_ff: int):
+        super().__init__()
+        self.attn = SingleHeadAttention(d_model, d_k, d_v)
+        self.ffn = FFN(d_model, d_ff)
+        self.norm1 = LayerNorm((d_model,))
+        self.norm2 = LayerNorm((d_model,))
+
+    def forward(self, x: Tensor) -> Tensor:
+        attn_out = self.attn(x)
+        x = self.norm1(x + attn_out)
+
+        ffn_out = self.ffn(x)
+        x = self.norm2(x + ffn_out)
+        return x
+
+
+class Encoder(nn.Module):
+    def __init__(self, n: int, d_model: int, d_k: int, d_v: int, d_ff: int):
+        super().__init__()
+        self.layers = nn.ModuleList(
+            [EncoderLayer(d_model, d_k, d_v, d_ff) for _ in range(n)]
+        )
+
+    def forward(self, x: Tensor) -> Tensor:
+        for layer in self.layers:
+            x = layer(x)
+        return x
+
+
+class Transformer(nn.Module):
+    def __init__(
+        self,
+        vocab_size: int,
+        d_model: int,
+        num_layers: int,
+        d_k: int,
+        d_v: int,
+        d_ff: int,
+        max_seq_length: int,
+    ):
+        super().__init__()
+        self.embedding = nn.Embedding(vocab_size, d_model)
+        self.pos_encoder = PositionalEncoding(d_model, max_seq_length)
+        self.encoder = Encoder(num_layers, d_model, d_k, d_v, d_ff)
