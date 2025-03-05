@@ -30,6 +30,19 @@ def xavier_uniform(x: Tensor, fan_in: int, fan_out: int):
         return x.uniform_(-a, a)
 
 
+class Dropout(nn.Module):
+    def __init__(self, p=0.5):
+        super().__init__()
+        self.p = p
+
+    def forward(self, x: Tensor) -> Tensor:
+        if self.training:
+            # Create a binary mask using Bernoulli distribution
+            mask = torch.bernoulli(torch.ones_like(x) * (1 - self.p))
+            return x * mask / (1 - self.p)
+        return x
+
+
 class LayerNorm(nn.Module):
     def __init__(self, shape: tuple[int, ...], eps=1e-5) -> None:
         super().__init__()
@@ -49,8 +62,9 @@ class LayerNorm(nn.Module):
 
 
 class AttentionBlock(nn.Module):
-    def __init__(self):
+    def __init__(self, dropout_rate=0.1):
         super().__init__()
+        self.dropout = Dropout(p=dropout_rate)
 
     def forward(self, Q: Tensor, K: Tensor, V: Tensor) -> Tensor:
         """
@@ -61,18 +75,17 @@ class AttentionBlock(nn.Module):
         d_k = K.size(-1)  # Feature dimension of K
         attn_scores = (Q @ K.transpose(-1, -2)) / math.sqrt(d_k)
         attn_weights = softmax(attn_scores, dim=-1)
+        attn_weights = self.dropout(attn_weights)
         return attn_weights @ V
 
 
 class SingleHeadAttention(nn.Module):
     def __init__(self, d_model: int, d_k: int, d_v: int) -> None:
         super().__init__()
-        sqrt_d_model = torch.sqrt(torch.tensor(d_model))
-        sqrt_d_v = torch.sqrt(torch.tensor(d_v))
-        self.W_Q = nn.Parameter(torch.randn(d_model, d_k)) / sqrt_d_model
-        self.W_K = nn.Parameter(torch.randn(d_model, d_k)) / sqrt_d_model
-        self.W_V = nn.Parameter(torch.randn(d_model, d_v)) / sqrt_d_model
-        self.W_O = nn.Parameter(torch.randn(d_v, d_model)) / sqrt_d_v
+        self.W_Q = nn.Parameter(torch.randn(d_model, d_k))
+        self.W_K = nn.Parameter(torch.randn(d_model, d_k))
+        self.W_V = nn.Parameter(torch.randn(d_model, d_v))
+        self.W_O = nn.Parameter(torch.randn(d_v, d_model))
 
         xavier_uniform(self.W_Q)
         xavier_uniform(self.W_K)
@@ -104,6 +117,8 @@ class MultiHeadAttention(nn.Module):
         xavier_uniform(self.W_K.weight)
         xavier_uniform(self.W_V.weight)
         xavier_uniform(self.W_O.weight)
+
+        self.attention = AttentionBlock()
 
     def forward(self, x: Tensor) -> Tensor:
         B, T, _ = x.shape
