@@ -8,7 +8,9 @@ from relu import relu
 
 
 def softmax(z: Tensor, dim=None) -> Tensor:
-    z_exp = torch.exp(z)
+    z_max = z.max(dim=dim, keepdim=True).values
+    z_stable = z - z_max
+    z_exp = torch.exp(z_stable)
     return z_exp / z_exp.sum(dim=dim, keepdim=True)
 
 
