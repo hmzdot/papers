@@ -1,4 +1,6 @@
 import math
+from typing import Union
+
 import torch
 import torch.nn as nn
 from torch import Tensor
@@ -82,54 +84,64 @@ class AttentionBlock(nn.Module):
 
 
 class MultiHeadAttention(nn.Module):
-    def __init__(self, d_model: int, num_heads: int, mask=None):
+    def __init__(self, d_model: int, num_heads: int):
         super().__init__()
         self.num_heads = num_heads
+        self.d_model = d_model
         self.d_k = d_model // num_heads
-        self.mask = mask
 
         self.W_Q = nn.Linear(d_model, d_model)
         self.W_K = nn.Linear(d_model, d_model)
         self.W_V = nn.Linear(d_model, d_model)
         self.W_O = nn.Linear(d_model, d_model)
 
-        xavier_uniform(self.W_Q.weight)
-        xavier_uniform(self.W_K.weight)
-        xavier_uniform(self.W_V.weight)
-        xavier_uniform(self.W_O.weight)
+        xavier_uniform(self.W_Q.weight, fan_in=d_model, fan_out=d_model)
+        xavier_uniform(self.W_K.weight, fan_in=d_model, fan_out=d_model)
+        xavier_uniform(self.W_V.weight, fan_in=d_model, fan_out=d_model)
+        xavier_uniform(self.W_O.weight, fan_in=d_model, fan_out=d_model)
 
         self.attention = AttentionBlock()
 
-    def forward(self, x: Tensor) -> Tensor:
-        B, T, _ = x.shape
-        Q = self.W_Q(x).view(B, T, self.num_heads, self.d_k).transpose(1, 2)
-        K = self.W_K(x).view(B, T, self.num_heads, self.d_k).transpose(1, 2)
-        V = self.W_V(x).view(B, T, self.num_heads, self.d_k).transpose(1, 2)
+    def forward(
+        self,
+        Q: Tensor,
+        K: Union[Tensor, None] = None,
+        V: Union[Tensor, None] = None,
+        mask=None,
+    ) -> Tensor:
+        if K is None:
+            K = Q
+        if V is None:
+            V = K
 
-        attn_output = self.attention(Q, K, V, self.mask)
-        attn_output = attn_output.transpose(1, 2).contiguous().view(B, T, -1)
+        batch_size, _, _ = Q.shape
+        Q = self.W_Q(Q).view(batch_size, -1, self.num_heads, self.d_k).transpose(1, 2)
+        K = self.W_K(K).view(batch_size, -1, self.num_heads, self.d_k).transpose(1, 2)
+        V = self.W_V(V).view(batch_size, -1, self.num_heads, self.d_k).transpose(1, 2)
+
+        attn_output = self.attention(Q, K, V, mask)
+        attn_output = (
+            attn_output.transpose(1, 2).contiguous().view(batch_size, -1, self.d_model)
+        )
         return self.W_O(attn_output)
 
 
 class FFN(nn.Module):
     def __init__(self, d_model: int, d_ff: int) -> None:
         super().__init__()
-        self.W1 = nn.Parameter(torch.randn((d_model, d_ff)))
-        self.W2 = nn.Parameter(torch.randn((d_ff, d_model)))
+        self.W1 = nn.Parameter(torch.empty((d_model, d_ff)))
+        self.W2 = nn.Parameter(torch.empty((d_ff, d_model)))
         self.b1 = nn.Parameter(torch.zeros((d_ff,)))
         self.b2 = nn.Parameter(torch.zeros((d_model,)))
 
-    def forward(self, x: Tensor):
-        """
-        # Parameters:
-        - x: (batch_size, seq_length, d_model) shaped Tensor
-        """
+        xavier_uniform(self.W1, fan_in=d_model, fan_out=d_ff)
+        xavier_uniform(self.W2, fan_in=d_ff, fan_out=d_model)
+
+    def forward(self, x: Tensor) -> Tensor:
         return relu(x @ self.W1 + self.b1) @ self.W2 + self.b2
 
 
 class PositionalEncoding(nn.Module):
-    """Dimensionality of the model"""
-
     def __init__(self, d_model: int, max_seq_length=5000):
         super().__init__()
         self.d_model = d_model
@@ -149,18 +161,14 @@ class PositionalEncoding(nn.Module):
         # Register as buffer (not a trainable parameter)
         self.register_buffer("pe", pe.unsqueeze(0))
 
-    def forward(self, x: torch.Tensor) -> torch.Tensor:
-        """
-        Args:
-            x: Input tensor (batch_size, seq_len, d_model)
-        """
+    def forward(self, x: Tensor) -> Tensor:
         return x + self.pe[:, : x.size(1)]
 
 
 class EncoderLayer(nn.Module):
-    def __init__(self, d_model: int, d_k: int, d_v: int, d_ff: int):
+    def __init__(self, d_model: int, num_heads: int, d_ff: int):
         super().__init__()
-        self.attn = MultiHeadAttention(d_model, d_k, d_v)
+        self.attn = MultiHeadAttention(d_model, num_heads)
         self.ffn = FFN(d_model, d_ff)
         self.norm1 = LayerNorm((d_model,))
         self.norm2 = LayerNorm((d_model,))
@@ -175,10 +183,10 @@ class EncoderLayer(nn.Module):
 
 
 class Encoder(nn.Module):
-    def __init__(self, n: int, d_model: int, d_k: int, d_v: int, d_ff: int):
+    def __init__(self, n: int, d_model: int, num_heads: int, d_ff: int):
         super().__init__()
         self.layers = nn.ModuleList(
-            [EncoderLayer(d_model, d_k, d_v, d_ff) for _ in range(n)]
+            [EncoderLayer(d_model, num_heads, d_ff) for _ in range(n)]
         )
 
     def forward(self, x: Tensor) -> Tensor:
@@ -188,37 +196,45 @@ class Encoder(nn.Module):
 
 
 class DecoderLayer(nn.Module):
-    def __init__(self, d_model: int, d_k: int, d_v: int, d_ff: int):
+    def __init__(self, d_model: int, num_heads: int, d_ff: int):
         super().__init__()
-        mask = torch.triu(torch.ones(d_k, d_k), diagonal=1)
-        self.masked_attn = MultiHeadAttention(d_model, d_k, d_v, mask=mask)
-        self.attn = MultiHeadAttention(d_model, d_k, d_v)
+        self.masked_attn = MultiHeadAttention(d_model, num_heads)
+        self.attn = MultiHeadAttention(d_model, num_heads)
         self.ffn = FFN(d_model, d_ff)
         self.norm1 = LayerNorm((d_model,))
         self.norm2 = LayerNorm((d_model,))
+        self.norm3 = LayerNorm((d_model,))
 
-    def forward(self, x: Tensor) -> Tensor:
-        masked_attn_out = self.masked_attn(x)
+    def forward(self, x: Tensor, memory: Tensor) -> Tensor:
+        # Create dynamic mask based on sequence length
+        _, seq_length, _ = x.shape
+        mask = torch.triu(
+            torch.ones(seq_length, seq_length),
+            diagonal=1,
+            device=x.device,
+        ).bool()
+
+        masked_attn_out = self.masked_attn(Q=x, K=x, V=x, mask=mask)
         x = self.norm1(x + masked_attn_out)
 
-        attn_out = self.attn(x)
-        x = self.norm1(x + attn_out)
+        enc_dec_attn_out = self.attn(Q=x, K=memory, V=memory)
+        x = self.norm2(x + enc_dec_attn_out)
 
         ffn_out = self.ffn(x)
-        x = self.norm2(x + ffn_out)
+        x = self.norm3(x + ffn_out)
         return x
 
 
 class Decoder(nn.Module):
-    def __init__(self, n: int, d_model: int, d_k: int, d_v: int, d_ff: int):
+    def __init__(self, n: int, d_model: int, num_heads: int, d_ff: int):
         super().__init__()
         self.layers = nn.ModuleList(
-            [DecoderLayer(d_model, d_k, d_v, d_ff) for _ in range(n)]
+            [DecoderLayer(d_model, num_heads, d_ff) for _ in range(n)]
         )
 
-    def forward(self, x: Tensor) -> Tensor:
+    def forward(self, x: Tensor, memory: Tensor) -> Tensor:
         for layer in self.layers:
-            x = layer(x)
+            x = layer(x, memory)
         return x
 
 
@@ -228,12 +244,26 @@ class Transformer(nn.Module):
         vocab_size: int,
         d_model: int,
         num_layers: int,
-        d_k: int,
-        d_v: int,
+        num_heads: int,
         d_ff: int,
         max_seq_length: int,
     ):
         super().__init__()
         self.embedding = nn.Embedding(vocab_size, d_model)
         self.pos_encoder = PositionalEncoding(d_model, max_seq_length)
-        self.encoder = Encoder(num_layers, d_model, d_k, d_v, d_ff)
+        self.encoder = Encoder(num_layers, d_model, num_heads, d_ff)
+        self.decoder = Decoder(num_layers, d_model, num_heads, d_ff)
+        self.fc_out = nn.Linear(d_model, vocab_size)
+
+    def forward(self, src: Tensor, tgt: Tensor) -> Tensor:
+        # Encoder
+        src_emb = self.embedding(src)
+        src_emb = self.pos_encoder(src_emb)
+        memory = self.encoder(src_emb)
+
+        # Decoder
+        tgt_emb = self.embedding(tgt)
+        tgt_emb = self.pos_encoder(tgt_emb)
+        output = self.decoder(tgt_emb, memory)
+
+        return self.fc_out(output)
