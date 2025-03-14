@@ -291,71 +291,17 @@ class Decoder(nn.Module):
         return self.inner(trg)
 
 
-class Transformer(nn.Module):
-    def __init__(
-        self,
-        src_pad_idx: int,
-        trg_pad_idx: int,
-        trg_sos_idx: int,
-        enc_voc_size: int,
-        dec_voc_size: int,
-        d_model: int,
-        num_heads: int,
-        max_len: int,
-        ffn_hidden: int,
-        num_layers: int,
-        drop_prob: float,
-        device: torch.device,
-    ):
+class ViT(nn.Module):
+    def __init__(self, patch_resolution: int):
         super().__init__()
-        self.src_pad_idx = src_pad_idx
-        self.trg_pad_idx = trg_pad_idx
-        self.trg_sos_idx = trg_sos_idx
-        self.device = device
-        self.encoder = Encoder(
-            d_model=d_model,
-            num_heads=num_heads,
-            max_len=max_len,
-            ffn_hidden=ffn_hidden,
-            enc_voc_size=enc_voc_size,
-            drop_prob=drop_prob,
-            num_layers=num_layers,
-            device=device,
-        )
+        self.p = patch_resolution
 
-        self.decoder = Decoder(
-            d_model=d_model,
-            num_heads=num_heads,
-            max_len=max_len,
-            ffn_hidden=ffn_hidden,
-            dec_voc_size=dec_voc_size,
-            drop_prob=drop_prob,
-            num_layers=num_layers,
-            device=device,
-        )
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
+        """
+        # Parameters
+        - `x`: (batch x height x width x channels)
+        """
+        b, h, w, c = x.shape
+        n = h * w / (self.p**2)
 
-    def forward(
-        self,
-        src: torch.Tensor,
-        trg: torch.Tensor,
-    ) -> torch.Tensor:
-        src_mask = self.make_src_mask(src)
-        trg_mask = self.make_trg_mask(trg)
-        enc_src = self.encoder(src, src_mask)
-        output = self.decoder(trg, enc_src, trg_mask, src_mask)
-        return output
-
-    def make_src_mask(self, src: torch.Tensor) -> torch.Tensor:
-        src_mask = (src != self.src_pad_idx).unsqueeze(1).unsqueeze(2)
-        return src_mask
-
-    def make_trg_mask(self, trg: torch.Tensor) -> torch.Tensor:
-        trg_pad_mask = (trg != self.trg_pad_idx).unsqueeze(1).unsqueeze(3)
-        trg_len = trg.shape[1]
-        trg_sub_mask = (
-            torch.tril(torch.ones(trg_len, trg_len))
-            .type(torch.ByteTensor)
-            .to(self.device)
-        )
-        trg_mask = trg_pad_mask & trg_sub_mask
-        return trg_mask
+        x = x.reshape((b, n, self.p**2 * c))  # (batch x n x p²c)
