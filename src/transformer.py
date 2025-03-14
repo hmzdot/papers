@@ -294,18 +294,18 @@ class Decoder(nn.Module):
 class Transformer(nn.Module):
     def __init__(
         self,
-        src_pad_idx: int,
-        trg_pad_idx: int,
-        trg_sos_idx: int,
-        enc_voc_size: int,
-        dec_voc_size: int,
-        d_model: int,
-        num_heads: int,
-        max_len: int,
-        ffn_hidden: int,
-        num_layers: int,
-        drop_prob: float,
-        device: torch.device,
+        src_pad_idx: int = 0,
+        trg_pad_idx: int = 0,
+        trg_sos_idx: int = 1,
+        enc_voc_size: int = 5000,
+        dec_voc_size: int = 5000,
+        d_model: int = 512,
+        num_heads: int = 8,
+        max_len: int = 1024,
+        ffn_hidden: int = 2048,
+        num_layers: int = 6,
+        drop_prob: float = 0.1,
+        device: torch.device = torch.device("cpu"),
     ):
         super().__init__()
         self.src_pad_idx = src_pad_idx
@@ -346,16 +346,30 @@ class Transformer(nn.Module):
         return output
 
     def make_src_mask(self, src: torch.Tensor) -> torch.Tensor:
-        src_mask = (src != self.src_pad_idx).unsqueeze(1).unsqueeze(2)
-        return src_mask
+        """
+        # Parameters:
+        - src: [batch_size, src_len]
+
+        # Returns:
+        - Mask [batch_size, 1, 1, src_len], 1 to attend to, 0 to ignore
+        """
+        padding_mask = src != self.src_pad_idx  # [batch_size, src_len]
+        return padding_mask.unsqueeze(1).unsqueeze(2)
 
     def make_trg_mask(self, trg: torch.Tensor) -> torch.Tensor:
-        trg_pad_mask = (trg != self.trg_pad_idx).unsqueeze(1).unsqueeze(3)
-        trg_len = trg.shape[1]
-        trg_sub_mask = (
-            torch.tril(torch.ones(trg_len, trg_len))
-            .type(torch.ByteTensor)
-            .to(self.device)
+        """
+        # Parameters:
+        - trg: [batch_size, trg_len]
+
+        # Returns:
+        - Mask [batch_size, 1, trg_len, trg_len], 1 to attend to, 0 to ignore
+        """
+        _, trg_len = trg.shape
+
+        padding_mask = (trg != self.trg_pad_idx).unsqueeze(1).unsqueeze(2)
+        look_ahead_mask = torch.tril(
+            torch.ones(trg_len, trg_len, device=self.device, dtype=torch.bool)
         )
-        trg_mask = trg_pad_mask & trg_sub_mask
-        return trg_mask
+        combined_mask = padding_mask & look_ahead_mask
+
+        return combined_mask
