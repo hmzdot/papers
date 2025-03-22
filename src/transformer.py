@@ -33,10 +33,10 @@ class MSA(nn.Module):
         self.W_V = nn.Linear(d_model, d_model)
         self.W_O = nn.Linear(d_model, d_model)
 
-        nn.init.xavier_uniform(self.W_Q.weight, gain=1)
-        nn.init.xavier_uniform(self.W_K.weight, gain=1)
-        nn.init.xavier_uniform(self.W_V.weight, gain=1)
-        nn.init.xavier_uniform(self.W_O.weight, gain=1)
+        nn.init.xavier_uniform_(self.W_Q.weight, gain=1)
+        nn.init.xavier_uniform_(self.W_K.weight, gain=1)
+        nn.init.xavier_uniform_(self.W_V.weight, gain=1)
+        nn.init.xavier_uniform_(self.W_O.weight, gain=1)
 
         self.attention = ScaledDotProductAttention()
 

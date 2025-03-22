@@ -56,7 +56,6 @@ class ViT(nn.Module):
         src_pad_idx: int = 0,
         trg_pad_idx: int = 0,
         trg_sos_idx: int = 1,
-        enc_voc_size: int = 5000,
         dec_voc_size: int = 5000,
         d_model: int = 512,
         num_heads: int = 8,
@@ -86,13 +85,10 @@ class ViT(nn.Module):
         )
         self.encoder = Encoder(
             d_model=d_model,
-            num_heads=num_heads,
-            max_len=max_len,
             ffn_hidden=ffn_hidden,
-            enc_voc_size=enc_voc_size,
-            drop_prob=drop_prob,
+            num_heads=num_heads,
             num_layers=num_layers,
-            device=device,
+            drop_prob=drop_prob,
             embedding=self.patch_embedding,
         )
 
@@ -191,6 +187,7 @@ def main():
         ffn_hidden=2048,
         num_layers=6,
         drop_prob=0.1,
+        num_classes=2,
         device=torch.device("cuda" if torch.cuda.is_available() else "cpu"),
     )
 
@@ -201,10 +198,11 @@ def main():
     target = torch.randint(0, 5000, (1, 10))  # Assuming dec_voc_size=5000
 
     # Forward pass
-    output = model(image, target)
+    output, cls_head = model(image, target)
 
     # Output shape should be [batch_size, trg_len, dec_voc_size]
     print(output.shape)  # Should be torch.Size([1, 10, 5000])
+    print(cls_head)
 
 
 if __name__ == "__main__":
