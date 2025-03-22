@@ -11,6 +11,7 @@ class PatchEmbedding(nn.Module):
         patch_size: int,
         in_channels: int,
         embed_dim: int,
+        num_classes=0,
     ):
         super().__init__()
         assert img_size % patch_size == 0, "Image not divisible by patch"
@@ -18,6 +19,12 @@ class PatchEmbedding(nn.Module):
         self.num_patches = (img_size // patch_size) ** 2
         self.patch_size = patch_size
         self.projection = nn.Linear(patch_size**2 * in_channels, embed_dim)
+        self.pos_embedding = nn.Parameter(
+            torch.randn(1, self.num_patches + (1 if num_classes else 0), embed_dim)
+        )
+        self.cls_token = (
+            nn.Parameter(torch.randn(1, 1, embed_dim)) if num_classes > 0 else None
+        )
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
         """
@@ -35,6 +42,11 @@ class PatchEmbedding(nn.Module):
         )  # [b, num_patches, p²c]
         x = self.projection(x)  # [b, num_patches, embed_dim]
 
+        if self.cls_token is not None:
+            cls_tokens = self.cls_token.expand(b, -1, -1)
+            x = torch.cat([cls_tokens, x], dim=1)
+
+        x += self.pos_embedding
         return x
 
 
@@ -55,6 +67,7 @@ class ViT(nn.Module):
         img_size: int = 224,
         patch_size: int = 16,
         in_channels: int = 3,
+        num_classes: int = 0,
         device: torch.device = torch.device("cpu"),
     ):
         super().__init__()
@@ -62,12 +75,14 @@ class ViT(nn.Module):
         self.trg_pad_idx = trg_pad_idx
         self.trg_sos_idx = trg_sos_idx
         self.device = device
+        self.num_classes = num_classes
 
         self.patch_embedding = PatchEmbedding(
             img_size=img_size,
             patch_size=patch_size,
             in_channels=in_channels,
             embed_dim=d_model,
+            num_classes=num_classes,
         )
         self.encoder = Encoder(
             d_model=d_model,
@@ -119,13 +134,19 @@ class ViT(nn.Module):
     def make_src_mask(self, src: torch.Tensor) -> torch.Tensor:
         """
         # Parameters:
-        - src: [batch_size, src_len]
+        - src: [batch_size, channels, height, width]
 
         # Returns:
-        - Mask [batch_size, 1, 1, src_len], 1 to attend to, 0 to ignore
+        - Mask [batch_size, 1, 1, num_patches + 1], 1 to attend to, 0 to ignore
         """
-        padding_mask = src != self.src_pad_idx  # [batch_size, src_len]
-        return padding_mask.unsqueeze(1).unsqueeze(2)
+        batch_size, _, _, _ = src.shape
+        return torch.ones(
+            batch_size,
+            1,
+            1,
+            self.patch_embedding.num_patches + (1 if self.num_classes else 0),
+            device=self.device,
+        )
 
     def make_trg_mask(self, trg: torch.Tensor) -> torch.Tensor:
         """
@@ -144,3 +165,35 @@ class ViT(nn.Module):
         combined_mask = padding_mask & look_ahead_mask
 
         return combined_mask
+
+
+def main():
+    # Initialize the model
+    model = ViT(
+        img_size=224,
+        patch_size=16,
+        in_channels=3,
+        d_model=512,
+        num_heads=8,
+        max_len=1024,
+        ffn_hidden=2048,
+        num_layers=6,
+        drop_prob=0.1,
+        device=torch.device("cuda" if torch.cuda.is_available() else "cpu"),
+    )
+
+    # Create a dummy image tensor
+    image = torch.randn(1, 3, 224, 224)
+
+    # Create a dummy target tensor (e.g., a sequence of token indices)
+    target = torch.randint(0, 5000, (1, 10))  # Assuming dec_voc_size=5000
+
+    # Forward pass
+    output = model(image, target)
+
+    # Output shape should be [batch_size, trg_len, dec_voc_size]
+    print(output.shape)  # Should be torch.Size([1, 10, 5000])
+
+
+if __name__ == "__main__":
+    main()
