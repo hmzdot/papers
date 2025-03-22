@@ -113,6 +113,11 @@ class ViT(nn.Module):
             embedding=self.token_embedding,
         )
 
+        if self.num_classes > 0:
+            self.cls_head = nn.Linear(d_model, num_classes)
+        else:
+            self.cls_head = None
+
     def forward(
         self,
         src: torch.Tensor,
@@ -129,7 +134,14 @@ class ViT(nn.Module):
         trg_mask = self.make_trg_mask(trg)  # [b, 1, trg_len, trg_len]
         enc_src = self.encoder(src, src_mask)  # [b, n, d_model]
         output = self.decoder(trg, enc_src, trg_mask, src_mask)
-        return output  # [batch_size, trg_len, trg_vocab_size]
+
+        if self.num_classes > 0:
+            cls_embedding = enc_src[:, 0, :]  # Embeddings of [CLS] token
+            cls_logits = self.cls_head(cls_embedding)
+        else:
+            cls_logits = None
+
+        return output, cls_logits  # [batch_size, trg_len, trg_vocab_size]
 
     def make_src_mask(self, src: torch.Tensor) -> torch.Tensor:
         """
