@@ -41,7 +41,11 @@ class MSA(nn.Module):
         self.attention = ScaledDotProductAttention()
 
     def forward(
-        self, Q: torch.Tensor, K: torch.Tensor, V: torch.Tensor, mask=None
+        self,
+        Q: torch.Tensor,
+        K: torch.Tensor,
+        V: torch.Tensor,
+        mask=None,
     ) -> torch.Tensor:
         """
         # Parameters
@@ -167,23 +171,15 @@ class EncoderLayer(nn.Module):
 class Encoder(nn.Module):
     def __init__(
         self,
-        enc_voc_size: int,
-        max_len: int,
         d_model: int,
         ffn_hidden: int,
         num_heads: int,
         num_layers: int,
         drop_prob: float,
-        device: torch.device,
+        embedding: nn.Module,
     ):
         super().__init__()
-        self.embedding = TransformerEmbedding(
-            vocab_size=enc_voc_size,
-            d_model=d_model,
-            max_len=max_len,
-            drop_prob=drop_prob,
-            device=device,
-        )
+        self.embedding = embedding
         self.layers = nn.ModuleList(
             [
                 EncoderLayer(
@@ -254,15 +250,11 @@ class Decoder(nn.Module):
         num_heads: int,
         num_layers: int,
         drop_prob: float,
+        embedding: nn.Module,
         device: torch.device,
     ):
-        self.embedding = TransformerEmbedding(
-            vocab_size=dec_voc_size,
-            d_model=d_model,
-            max_len=max_len,
-            drop_prob=drop_prob,
-            device=device,
-        )
+        super().__init__()
+        self.embedding = embedding
         self.layers = nn.ModuleList(
             [
                 DecoderLayer(
@@ -312,6 +304,14 @@ class Transformer(nn.Module):
         self.trg_pad_idx = trg_pad_idx
         self.trg_sos_idx = trg_sos_idx
         self.device = device
+        self.encoder_embedding = TransformerEmbedding(
+            vocab_size=enc_voc_size,
+            d_model=d_model,
+            max_len=max_len,
+            drop_prob=drop_prob,
+            device=device,
+        )
+
         self.encoder = Encoder(
             d_model=d_model,
             num_heads=num_heads,
@@ -320,9 +320,17 @@ class Transformer(nn.Module):
             enc_voc_size=enc_voc_size,
             drop_prob=drop_prob,
             num_layers=num_layers,
+            embedding=self.encoder_embedding,
             device=device,
         )
 
+        self.decoder_embedding = TransformerEmbedding(
+            vocab_size=dec_voc_size,
+            d_model=d_model,
+            max_len=max_len,
+            drop_prob=drop_prob,
+            device=device,
+        )
         self.decoder = Decoder(
             d_model=d_model,
             num_heads=num_heads,
@@ -331,6 +339,7 @@ class Transformer(nn.Module):
             dec_voc_size=dec_voc_size,
             drop_prob=drop_prob,
             num_layers=num_layers,
+            embedding=self.decoder_embedding,
             device=device,
         )
 
